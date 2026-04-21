@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - PedalPower</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="auth-body">
+    <div class="auth-card" style="max-width: 440px;">
+        <h2 class="text-center fw-bold mb-4">⚡ PedalPower</h2>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} small">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" id="registerForm">
+            <div class="mb-3">
+                <label class="form-label small text-muted text-uppercase">Username</label>
+                <input type="text" name="username" class="form-control" required autofocus>
+            </div>
+            <div class="mb-3">
+                <label class="form-label small text-muted text-uppercase">Email</label>
+                <input type="email" name="email" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label small text-muted text-uppercase">Password</label>
+                <input type="password" name="password" id="password" class="form-control" required>
+            </div>
+            <div class="mb-4">
+                <label class="form-label small text-muted text-uppercase">Confirm Password</label>
+                <input type="password" name="confirm_password" id="confirm_password" class="form-control" required>
+                <div class="invalid-feedback">Passwords do not match</div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100 py-2">Create Account</button>
+        </form>
+        
+        <div class="mt-4 text-center">
+            <p class="small text-muted">Already have an account? <a href="{{ url_for('auth.login') }}" class="text-orange text-decoration-none">Log In</a></p>
+        </div>
+    </div>
+
+    <script>
+        const password = document.getElementById('password');
+        const confirmPassword = document.getElementById('confirm_password');
+
+        function validatePassword() {
+            if (password.value !== confirmPassword.value && confirmPassword.value.length > 0) {
+                confirmPassword.classList.add('is-invalid');
+            } else {
+                confirmPassword.classList.remove('is-invalid');
+            }
+        }
+
+        password.addEventListener('input', validatePassword);
+        confirmPassword.addEventListener('input', validatePassword);
+        confirmPassword.addEventListener('blur', validatePassword);
+    </script>
+</body>
+</html>

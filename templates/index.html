@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div id="app" v-cloak>
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card-dark d-flex justify-content-between align-items-center">
+                <div>
+                    <h4 class="mb-0">
+                        <span :class="['pulse-dot', { 'dot-inactive': !isLive || !isConnected }]"></span>
+                        <span v-if="isLive">
+                            Session in Progress 
+                            <span v-if="isConnected" class="badge bg-success ms-2" style="font-size: 0.7rem;">Connected</span>
+                            <span v-else class="badge bg-warning text-dark ms-2" style="font-size: 0.7rem;">Waiting for ESP32...</span>
+                        </span>
+                        <span v-else>Ready to Pedal</span>
+                    </h4>
+                    <p class="text-muted small mb-0" v-if="isLive">Live data from your smart pedal system</p>
+                    <p class="text-muted small mb-0" v-else>Start a session to begin tracking energy</p>
+                </div>
+                <div>
+                    <button v-if="!isLive" @click="startSession" class="btn btn-primary px-4">Start Session</button>
+                    <button v-else @click="stopSession" class="btn btn-danger px-4">End Session</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Metric Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">RPM</div>
+                <div class="metric-value">[[ metrics.rpm.toFixed(0) ]]</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">Voltage</div>
+                <div class="metric-value">[[ metrics.voltage.toFixed(1) ]]<small class="fs-6">V</small></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">Current</div>
+                <div class="metric-value">[[ metrics.current.toFixed(2) ]]<small class="fs-6">A</small></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">Power</div>
+                <div class="metric-value">[[ (metrics.voltage * metrics.current).toFixed(1) ]]<small class="fs-6">W</small></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Totals and Chart -->
+    <div class="row g-4 mb-4">
+        <div class="col-lg-8">
+            <div class="card-dark h-100">
+                <h5 class="mb-4">Live Performance (RPM)</h5>
+                <canvas id="liveChart" style="max-height: 300px;"></canvas>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card-dark h-100">
+                <h5 class="mb-4">Session Totals</h5>
+                <div class="mb-3 d-flex justify-content-between">
+                    <span class="text-muted">Energy Generated</span>
+                    <span class="fw-bold">[[ formatEnergy(totals.energy_wh) ]]</span>
+                </div>
+                <div class="mb-3 d-flex justify-content-between">
+                    <span class="text-muted">Duration</span>
+                    <span class="fw-bold">[[ formatDuration(totals.duration) ]]</span>
+                </div>
+                <div class="mb-3 d-flex justify-content-between">
+                    <span class="text-muted">Calories Burned</span>
+                    <span class="fw-bold">[[ totals.calories.toFixed(1) ]] kcal</span>
+                </div>
+                <div class="mb-0 d-flex justify-content-between">
+                    <span class="text-muted">CO₂ Saved</span>
+                    <span class="fw-bold">[[ totals.co2.toFixed(1) ]] g</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gamification -->
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="card-dark">
+                <h5 class="mb-3">Daily Goal (10Wh)</h5>
+                <div class="progress mb-2" style="height: 12px;">
+                    <div class="progress-bar" role="progressbar" :style="{ width: Math.min((todayEnergy / 10) * 100, 100) + '%' }"></div>
+                </div>
+                <div class="d-flex justify-content-between small">
+                    <span>[[ formatEnergy(todayEnergy) ]] generated today</span>
+                    <span v-if="todayEnergy >= 10" class="text-success">Goal Reached!</span>
+                    <span v-else>[[ ((todayEnergy / 10) * 100).toFixed(0) ]]%</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card-dark d-flex align-items-center">
+                <div class="me-4">
+                    <div class="metric-label mb-1">Current Streak</div>
+                    <div class="h2 mb-0 fw-bold">[[ streak ]] Days</div>
+                </div>
+                <div class="border-start ps-4 flex-grow-1">
+                    <div class="metric-label mb-1">Status</div>
+                    <div class="fw-bold text-orange">[[ motivationalMessage ]]</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const { createApp } = Vue;
+
+createApp({
+    delimiters: ['[[', ']]'],
+    data() {
+        return {
+            sessionId: null,
+            isLive: false,
+            isConnected: false,
+            metrics: { rpm: 0, voltage: 0, current: 0 },
+            chartHistory: [],
+            totals: { energy_wh: 0, duration: 0, calories: 0, co2: 0 },
+            streak: 0,
+            todayEnergy: 0,
+            chart: null
+        }
+    },
+    computed: {
+        motivationalMessage() {
+            if (this.metrics.rpm > 80) return "Incredible! You're a powerhouse!";
+            if (this.metrics.rpm > 50) return "Great pace! Keep it up!";
+            if (this.metrics.rpm > 0) return "Good start! Feel the energy.";
+            return "Ready to generate some power?";
+        }
+    },
+    methods: {
+        async startSession() {
+            try {
+                const res = await fetch('/api/session/start', { method: 'POST' });
+                const data = await res.json();
+                this.sessionId = data.session_id;
+                this.isLive = true;
+                this.chartHistory = [];
+                // Reset metrics
+                this.metrics = { rpm: 0, voltage: 0, current: 0 };
+                this.totals = { energy_wh: 0, duration: 0, calories: 0, co2: 0 };
+            } catch (e) { console.error(e); }
+        },
+        async stopSession() {
+            try {
+                await fetch('/api/session/end', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: this.sessionId })
+                });
+                this.isLive = false;
+                this.sessionId = null;
+                this.fetchStats();
+            } catch (e) { console.error(e); }
+        },
+        async fetchLive() {
+            try {
+                const res = await fetch('/api/live');
+                const data = await res.json();
+                
+                if (data.active) {
+                    this.isLive = true;
+                    this.isConnected = data.is_connected;
+                    this.sessionId = data.session_id;
+                    this.metrics = data.metrics;
+                    this.totals = {
+                        energy_wh: data.totals.energy_wh,
+                        duration: data.totals.duration,
+                        calories: data.totals.calories,
+                        co2: data.totals.energy_wh * 400
+                    };
+                    
+                    // Update chart history
+                    const now = new Date().toLocaleTimeString();
+                    this.chartHistory.push({ time: now, rpm: data.metrics.rpm });
+                    if (this.chartHistory.length > 20) this.chartHistory.shift();
+                    
+                    this.updateChart();
+                } else if (this.isLive) {
+                    // Session ended elsewhere
+                    this.isLive = false;
+                    this.sessionId = null;
+                }
+            } catch (e) { console.error(e); }
+        },
+        async fetchStats() {
+            try {
+                const res = await fetch('/api/stats/summary');
+                const data = await res.json();
+                this.streak = data.streak_days;
+                
+                // Get today's energy from session history (simplified for now)
+                const histRes = await fetch('/api/sessions');
+                const sessions = await histRes.json();
+                const today = new Date().toISOString().split('T')[0];
+                this.todayEnergy = sessions
+                    .filter(s => s.start_time.startsWith(today))
+                    .reduce((sum, s) => sum + s.energy_wh, 0);
+            } catch (e) { console.error(e); }
+        },
+        updateChart() {
+            if (!this.chart) return;
+            this.chart.data.labels = this.chartHistory.map(h => h.time);
+            this.chart.data.datasets[0].data = this.chartHistory.map(h => h.rpm);
+            this.chart.update('none');
+        },
+        initChart() {
+            const ctx = document.getElementById('liveChart').getContext('2d');
+            this.chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'RPM',
+                        data: [],
+                        borderColor: '#f0a500',
+                        backgroundColor: 'rgba(240, 165, 0, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { display: false },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#30363d' },
+                            ticks: { color: '#8b949e' }
+                        }
+                    }
+                }
+            });
+        },
+        formatEnergy: window.formatEnergy,
+        formatDuration: window.formatDuration
+    },
+    mounted() {
+        this.fetchStats();
+        this.initChart();
+        setInterval(() => this.fetchLive(), 2000);
+    }
+}).mount('#app');
+</script>
+{% endblock %}

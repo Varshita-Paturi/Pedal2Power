@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div id="app" v-cloak>
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="fw-bold mb-4">Session History</h2>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row g-3 mb-5">
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">Total Sessions</div>
+                <div class="h3 mb-0 fw-bold">[[ summary.total_sessions || 0 ]]</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">Total Energy</div>
+                <div class="h3 mb-0 fw-bold">[[ (summary.total_energy_wh || 0).toFixed(1) ]]<small class="fs-6">Wh</small></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">Total Calories</div>
+                <div class="h3 mb-0 fw-bold">[[ (summary.total_calories || 0).toFixed(0) ]]<small class="fs-6">kcal</small></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card-dark text-center">
+                <div class="metric-label">Total CO₂ Saved</div>
+                <div class="h3 mb-0 fw-bold">[[ (summary.total_co2_saved_g || 0).toFixed(0) ]]<small class="fs-6">g</small></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- History Chart -->
+    <div class="row mb-5">
+        <div class="col-12">
+            <div class="card-dark">
+                <h5 class="mb-4">Energy Generation (Last 10 Sessions)</h5>
+                <canvas id="historyChart" style="max-height: 300px;"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sessions Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card-dark">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0">
+                        <thead>
+                            <tr class="text-muted small text-uppercase">
+                                <th>Date</th>
+                                <th>Duration</th>
+                                <th>Avg RPM</th>
+                                <th>Avg Voltage</th>
+                                <th>Energy (Wh)</th>
+                                <th>Calories</th>
+                                <th>CO₂ Saved</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="session in sessions" :key="session.id">
+                                <td>[[ formatDate(session.start_time) ]]</td>
+                                <td>[[ formatDuration(session.duration_seconds) ]]</td>
+                                <td>[[ session.avg_rpm.toFixed(0) ]]</td>
+                                <td>[[ session.avg_voltage.toFixed(1) ]]V</td>
+                                <td class="text-orange fw-bold">[[ session.energy_wh.toFixed(2) ]]</td>
+                                <td>[[ session.calories_burned.toFixed(1) ]]</td>
+                                <td>[[ session.co2_saved_g.toFixed(1) ]]g</td>
+                            </tr>
+                            <tr v-if="sessions.length === 0">
+                                <td colspan="7" class="text-center py-4 text-muted">No sessions yet — start pedaling!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const { createApp } = Vue;
+
+createApp({
+    delimiters: ['[[', ']]'],
+    data() {
+        return {
+            sessions: [],
+            summary: {},
+            chart: null
+        }
+    },
+    methods: {
+        async fetchData() {
+            try {
+                const [sessionsRes, summaryRes] = await Promise.all([
+                    fetch('/api/sessions'),
+                    fetch('/api/stats/summary')
+                ]);
+                this.sessions = await sessionsRes.json();
+                this.summary = await summaryRes.json();
+                
+                this.initChart();
+            } catch (e) { console.error(e); }
+        },
+        initChart() {
+            const last10 = [...this.sessions].reverse().slice(-10);
+            const ctx = document.getElementById('historyChart').getContext('2d');
+            
+            if (this.chart) this.chart.destroy();
+            
+            this.chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: last10.map(s => new Date(s.start_time).toLocaleDateString()),
+                    datasets: [{
+                        label: 'Energy (Wh)',
+                        data: last10.map(s => s.energy_wh),
+                        backgroundColor: '#f0a500',
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#30363d' },
+                            ticks: { color: '#8b949e' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#8b949e' }
+                        }
+                    }
+                }
+            });
+        },
+        formatDate: window.formatDate,
+        formatDuration: window.formatDuration
+    },
+    mounted() {
+        this.fetchData();
+    }
+}).mount('#app');
+</script>
+{% endblock %}

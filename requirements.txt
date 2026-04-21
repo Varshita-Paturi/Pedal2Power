@@ -4,3 +4,7 @@ flask-sqlalchemy
 flask-login
 werkzeug
 requests
+scikit-learn
+numpy
+pandas
+joblib

@@ -1,10 +1,35 @@
 from flask import Blueprint, request, jsonify, abort
 from flask_login import login_required, current_user
-from models.models import db, PedalSession
+from models.models import db, PedalSession, SessionData
+from ml.predictor import EnergyPredictor
 from datetime import datetime, timedelta
 import sqlalchemy as sa
 
 api = Blueprint('api', __name__)
+
+# Initialize ML Predictor
+predictor = EnergyPredictor()
+
+# Moving Average buffer
+ma_buffer = {}
+
+def get_moving_average(session_id, rpm, voltage, current):
+    if session_id not in ma_buffer:
+        ma_buffer[session_id] = []
+    
+    buffer = ma_buffer[session_id]
+    buffer.append({'rpm': rpm, 'voltage': voltage, 'current': current})
+    
+    # Keep only last 5
+    if len(buffer) > 5:
+        buffer.pop(0)
+    
+    # Calculate average
+    avg_rpm = sum(d['rpm'] for d in buffer) / len(buffer)
+    avg_voltage = sum(d['voltage'] for d in buffer) / len(buffer)
+    avg_current = sum(d['current'] for d in buffer) / len(buffer)
+    
+    return avg_rpm, avg_voltage, avg_current
 
 @api.before_request
 @login_required
@@ -25,22 +50,45 @@ def start_session():
 def session_data():
     data = request.json
     session_id = data.get('session_id')
-    rpm = float(data.get('rpm', 0))
-    voltage = float(data.get('voltage', 0))
-    current = float(data.get('current', 0))
+    raw_rpm = float(data.get('rpm', 0))
+    raw_voltage = float(data.get('voltage', 0))
+    raw_current = float(data.get('current', 0))
     
     session = PedalSession.query.get_or_404(session_id)
     if session.user_id != current_user.id:
         abort(403)
+    
+    # Apply Moving Average filter
+    smooth_rpm, smooth_voltage, smooth_current = get_moving_average(session_id, raw_rpm, raw_voltage, raw_current)
+    
+    # Store individual data point
+    data_point = SessionData(
+        session_id=session_id,
+        raw_rpm=raw_rpm,
+        raw_voltage=raw_voltage,
+        raw_current=raw_current,
+        smoothed_rpm=smooth_rpm,
+        smoothed_voltage=smooth_voltage,
+        smoothed_current=smooth_current,
+        power_w=smooth_voltage * smooth_current
+    )
+    db.session.add(data_point)
         
-    session._rpm_sum += rpm
-    session._voltage_sum += voltage
-    session._current_sum += current
+    # Update session summary (using smoothed values)
+    session._rpm_sum += smooth_rpm
+    session._voltage_sum += smooth_voltage
+    session._current_sum += smooth_current
     session._data_points += 1
     
     session.avg_rpm = session._rpm_sum / session._data_points
     session.avg_voltage = session._voltage_sum / session._data_points
     session.avg_current = session._current_sum / session._data_points
+    
+    # Update latest raw values
+    session.raw_rpm = raw_rpm
+    session.raw_voltage = raw_voltage
+    session.raw_current = raw_current
+    session.power_w = smooth_voltage * smooth_current
     session.last_updated = datetime.utcnow()
     
     db.session.commit()
@@ -67,7 +115,44 @@ def end_session():
     session.co2_saved_g = session.energy_wh * 400
     
     db.session.commit()
+    
+    # Auto-train ML model if session count >= 5
+    session_count = PedalSession.query.filter(PedalSession.end_time != None).count()
+    if session_count >= 5:
+        # Get all data points for training
+        all_data = SessionData.query.all()
+        predictor.train(all_data)
+    
     return jsonify(session.to_dict())
+
+@api.route('/api/ml/stats', methods=['GET'])
+def ml_stats():
+    # Get latest metrics for live prediction if available
+    live_session = PedalSession.query.filter_by(user_id=current_user.id, end_time=None).first()
+    predicted_power = 0
+    if live_session and predictor.stats['model_ready']:
+        _, rf_power = predictor.predict(live_session.avg_rpm, live_session.avg_voltage, live_session.avg_current)
+        predicted_power = rf_power
+
+    return jsonify({
+        **predictor.stats,
+        'predicted_power': predicted_power,
+        'session_count': PedalSession.query.filter(PedalSession.end_time != None).count()
+    })
+
+@api.route('/api/ml/predict', methods=['GET'])
+def ml_predict():
+    rpm = float(request.args.get('rpm', 0))
+    voltage = float(request.args.get('voltage', 0))
+    current = float(request.args.get('current', 0))
+    
+    lr_p, rf_p = predictor.predict(rpm, voltage, current)
+    
+    return jsonify({
+        'predicted_power_lr': lr_p or 0,
+        'predicted_power_rf': rf_p or 0,
+        'actual_power': voltage * current
+    })
 
 @api.route('/api/sessions', methods=['GET'])
 def get_sessions():

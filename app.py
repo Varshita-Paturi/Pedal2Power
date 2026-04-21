@@ -15,6 +15,27 @@ from models.models import db, User
 from routes.auth import auth as auth_blueprint
 from routes.main import main as main_blueprint
 from routes.api import api as api_blueprint
+import sqlalchemy as sa
+
+def run_migrations(app):
+    """Simple migration helper to add missing columns to existing database."""
+    with app.app_context():
+        engine = db.engine
+        inspector = sa.inspect(engine)
+        
+        # Check PedalSession table
+        columns = [c['name'] for c in inspector.get_columns('pedal_session')]
+        
+        with engine.connect() as conn:
+            if 'raw_rpm' not in columns:
+                conn.execute(sa.text('ALTER TABLE pedal_session ADD COLUMN raw_rpm FLOAT DEFAULT 0.0'))
+            if 'raw_voltage' not in columns:
+                conn.execute(sa.text('ALTER TABLE pedal_session ADD COLUMN raw_voltage FLOAT DEFAULT 0.0'))
+            if 'raw_current' not in columns:
+                conn.execute(sa.text('ALTER TABLE pedal_session ADD COLUMN raw_current FLOAT DEFAULT 0.0'))
+            if 'power_w' not in columns:
+                conn.execute(sa.text('ALTER TABLE pedal_session ADD COLUMN power_w FLOAT DEFAULT 0.0'))
+            conn.commit()
 
 def create_app():
     app = Flask(__name__)
@@ -37,6 +58,9 @@ def create_app():
     app.register_blueprint(auth_blueprint)
     app.register_blueprint(main_blueprint)
     app.register_blueprint(api_blueprint)
+
+    # Run migrations before create_all
+    run_migrations(app)
 
     # Create database tables
     with app.app_context():

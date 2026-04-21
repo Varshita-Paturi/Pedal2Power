@@ -12,3 +12,8 @@ def index():
 @login_required
 def history():
     return render_template('history.html')
+
+@main.route('/analytics')
+@login_required
+def analytics():
+    return render_template('analytics.html')

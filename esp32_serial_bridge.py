@@ -9,7 +9,7 @@ from models.models import db, PedalSession, SessionData
 
 
 _LINE_RE = re.compile(
-    r"Voltage:\s*(?P<voltage>-?\d+(?:\.\d+)?)\s*V\s*\|\s*Current:\s*(?P<current>-?\d+(?:\.\d+)?)\s*A",
+    r"(?:RPM:\s*(?P<rpm>-?\d+(?:\.\d+)?)\s*\|\s*)?Voltage:\s*(?P<voltage>-?\d+(?:\.\d+)?)\s*V\s*\|\s*Current:\s*(?P<current>-?\d+(?:\.\d+)?)\s*A",
     re.IGNORECASE,
 )
 
@@ -212,16 +212,25 @@ def start_esp32_serial_bridge(app) -> None:
                             try:
                                 voltage = float(m.group("voltage"))
                                 current = float(m.group("current"))
+                                rpm_str = m.group("rpm")
+                                if rpm_str is not None:
+                                    rpm = float(rpm_str)
+                                else:
+                                    # Fallback simulated RPM for testing
+                                    import random
+                                    rpm = random.uniform(40, 120)
                             except ValueError:
                                 continue
 
+                            print(f"[DEBUG - Source] RPM Generated: {rpm:.2f} (Simulated: {rpm_str is None})")
+
                             try:
                                 with app.app_context():
-                                    updated = _update_active_session(rpm=0.0, voltage=voltage, current=current)
+                                    updated = _update_active_session(rpm=rpm, voltage=voltage, current=current)
                                 now = time.time()
                                 if now - last_print > 2.0:
                                     if updated:
-                                        print(f"[ESP32] parsed: V={voltage:.3f}V I={current:.3f}A -> dashboard")
+                                        print(f"[ESP32] parsed: V={voltage:.3f}V I={current:.3f}A RPM={rpm:.1f} -> dashboard")
                                     else:
                                         print("[ESP32] parsed line but no active session (click Start Session).")
                                     last_print = now

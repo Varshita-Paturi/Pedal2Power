@@ -83,6 +83,9 @@
                             <div>
                                 <h4 class="mb-1 fw-bold text-white">[[ motivationalMessage ]]</h4>
                                 <p class="text-muted small mb-0"><i class="bi bi-lightbulb text-warning me-1"></i>[[ currentTip ]]</p>
+                                <div class="mt-2 text-info fw-bold">
+                                    ⚡ Predicted Power Output: [[ predictedPower === null ? 'N/A' : predictedPower.toFixed(2) + ' W' ]]
+                                </div>
                             </div>
                             <div class="text-end">
                                 <div class="badge bg-success bg-opacity-25 text-success rounded-pill px-3 py-2 border border-success border-opacity-25 shadow-sm">
@@ -203,7 +206,8 @@ createApp({
                 "Every watt counts! You're making a difference.",
                 "Consistent pedaling burns calories and saves the planet."
             ],
-            tipIndex: 0
+            tipIndex: 0,
+            predictedPower: null
         }
     },
     computed: {
@@ -297,6 +301,33 @@ createApp({
                     // Real-time daily goal update
                     this.todayEnergy = this.baseTodayEnergy + this.totals.energy_wh;
 
+                    // Fetch ML Prediction
+                    try {
+                        const predRes = await fetch('/predict', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                rpm: data.metrics?.rpm ?? 80, // fallback to 80 if rpm not exposed by API
+                                voltage: v,
+                                current: i,
+                                duration: this.totals.duration
+                            })
+                        });
+                        if (predRes.ok) {
+                            const predData = await predRes.json();
+                            if (predData.predicted_power !== undefined) {
+                                this.predictedPower = predData.predicted_power;
+                            } else {
+                                this.predictedPower = null;
+                            }
+                        } else {
+                            this.predictedPower = null;
+                        }
+                    } catch (e) {
+                        console.error('Prediction API error:', e);
+                        this.predictedPower = null;
+                    }
+
                 } else {
                     // No active server session
                     this.isConnected = false;
@@ -304,6 +335,7 @@ createApp({
                         this.isLive = false;
                         this.userStarted = false;
                         this.sessionId = null;
+                        this.predictedPower = null;
                     }
                 }
             } catch (e) { console.error(e); }

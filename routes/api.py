@@ -35,10 +35,16 @@ def get_moving_average(session_id, rpm, voltage, current):
     
     return avg_rpm, avg_voltage, avg_current
 
+from flask import current_app
+
 @api.before_request
-@login_required
 def check_auth():
-    pass
+    # Allow public access to the /predict endpoint
+    if request.endpoint == 'api.run_prediction':
+        return None
+        
+    if not current_user.is_authenticated:
+        return current_app.login_manager.unauthorized()
 
 @api.route('/api/session/start', methods=['POST'])
 def start_session():
@@ -143,6 +149,41 @@ def ml_stats():
         'predicted_power': predicted_power,
         'session_count': PedalSession.query.filter(PedalSession.end_time != None).count()
     })
+
+from ml.inference import inference_service
+
+@api.route('/predict', methods=['POST'])
+def run_prediction():
+    data = request.get_json()
+    
+    print(f"[DEBUG - API Reception] Incoming data: {data}")
+    
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+        
+    required_fields = ['rpm', 'voltage', 'current', 'duration']
+    for field in required_fields:
+        if field not in data:
+            print(f"[DEBUG - API Reception] Missing field: {field}")
+            return jsonify({'error': f'Missing required field: {field}'}), 400
+            
+    try:
+        rpm = float(data['rpm'])
+        voltage = float(data['voltage'])
+        current = float(data['current'])
+        duration = float(data['duration'])
+        print(f"[DEBUG - API Reception] Parsed RPM: {rpm}")
+    except ValueError:
+        return jsonify({'error': 'All fields must be numerical values'}), 400
+        
+    if not inference_service.ready:
+        return jsonify({'error': 'ML Model is not loaded on the server'}), 503
+        
+    try:
+        predicted_power = inference_service.predict(rpm, voltage, current, duration)
+        return jsonify({'predicted_power': predicted_power})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @api.route('/api/ml/predict', methods=['GET'])
 def ml_predict():
